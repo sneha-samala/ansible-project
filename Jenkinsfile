@@ -2,21 +2,21 @@ pipeline {
     agent any
 
     environment {
-        AWS_DEFAULT_REGION = "us-east-1"
+        TF_DIR = "ci-pipeline/terraform"
+        ANSIBLE_DIR = "ci-pipeline/ansible"
     }
 
     stages {
 
-        stage('Checkout') {
+        stage('Checkout SCM') {
             steps {
-                git url: 'https://github.com/shaikhshahbazz/ansible-project.git',
-                    branch: 'main'
+                checkout scm
             }
         }
 
         stage('Terraform Init') {
             steps {
-                dir('ci-pipeline/terraform') {
+                dir("${TF_DIR}") {
                     sh 'terraform init'
                 }
             }
@@ -25,13 +25,11 @@ pipeline {
         stage('Terraform Apply') {
             steps {
                 withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
+                    string(credentialsId: 'aws-access-key', secretVariable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'aws-secret-key', secretVariable: 'AWS_SECRET_ACCESS_KEY')
                 ]) {
-                    dir('ci-pipeline/terraform') {
-                        sh '''
-                          terraform apply -auto-approve
-                        '''
+                    dir("${TF_DIR}") {
+                        sh 'terraform apply -auto-approve'
                     }
                 }
             }
@@ -41,22 +39,20 @@ pipeline {
             steps {
                 withCredentials([
                     sshUserPrivateKey(
-                        credentialsId: 'ssh-private-key',
-                        keyFileVariable: 'SSH_KEY',
-                        usernameVariable: 'SSH_USER'
+                        credentialsId: 'ansible-ssh-key',
+                        keyFileVariable: 'SSH_KEY'
                     )
                 ]) {
-                    dir('ci-pipeline/ansible') {
+                    dir("${ANSIBLE_DIR}") {
                         sh '''
-                          chmod 600 $SSH_KEY
+                        chmod 600 $SSH_KEY
+                        export ANSIBLE_HOST_KEY_CHECKING=False
 
-                          export ANSIBLE_HOST_KEY_CHECKING=False
-
-                          ansible-playbook \
-                            -i inventory \
-                            site.yml \
-                            --user=$SSH_USER \
-                            --private-key=$SSH_KEY
+                        ansible-playbook \
+                          -i inventory \
+                          site.yml \
+                          --user=ec2-user \
+                          --private-key=$SSH_KEY
                         '''
                     }
                 }
@@ -66,10 +62,10 @@ pipeline {
 
     post {
         success {
-            echo '🎉 Pipeline completed successfully!'
+            echo "✅ Pipeline completed successfully!"
         }
         failure {
-            echo '❌ Pipeline failed. Check logs above.'
+            echo "❌ Pipeline failed. Check logs above."
         }
     }
 }
