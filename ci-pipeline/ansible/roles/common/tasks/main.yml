@@ -1,18 +1,18 @@
-- name: Disable SELinux
+- name: Disable SELinux (Amazon Linux / RHEL)
   selinux:
     state: disabled
   when: ansible_os_family == "RedHat"
 
-- name: Stop firewalld
+- name: Stop firewalld (RHEL only)
   service:
     name: firewalld
     state: stopped
     enabled: false
   when: ansible_os_family == "RedHat"
 
-- name: Stop UFW
+- name: Stop UFW (Ubuntu only)
   service:
     name: ufw
     state: stopped
     enabled: false
-  when: ansible_os_family == "Debian"
+  when: ansible_distribution == "Ubuntu"
