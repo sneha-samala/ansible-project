@@ -1,45 +1,75 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    ANSIBLE_HOST_KEY_CHECKING = 'False'
-  }
-
-  stages {
-
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
+    environment {
+        AWS_DEFAULT_REGION = "us-east-1"
     }
 
-    stage('Terraform Init') {
-      steps {
-        dir('ci-pipeline/terraform') {
-          sh 'terraform init'
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git url: 'https://github.com/shaikhshahbazz/ansible-project.git',
+                    branch: 'main'
+            }
         }
-      }
+
+        stage('Terraform Init') {
+            steps {
+                dir('ci-pipeline/terraform') {
+                    sh 'terraform init'
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
+                    dir('ci-pipeline/terraform') {
+                        sh '''
+                          terraform apply -auto-approve
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Ansible Configure') {
+            steps {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'ssh-private-key',
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    dir('ci-pipeline/ansible') {
+                        sh '''
+                          chmod 600 $SSH_KEY
+
+                          export ANSIBLE_HOST_KEY_CHECKING=False
+
+                          ansible-playbook \
+                            -i inventory \
+                            site.yml \
+                            --user=$SSH_USER \
+                            --private-key=$SSH_KEY
+                        '''
+                    }
+                }
+            }
+        }
     }
 
-    stage('Terraform Apply') {
-      environment {
-        AWS_ACCESS_KEY_ID     = credentials('AWS_ACCESS_KEY_ID')
-        AWS_SECRET_ACCESS_KEY = credentials('AWS_SECRET_ACCESS_KEY')
-        AWS_DEFAULT_REGION    = 'us-east-1'
-      }
-      steps {
-        dir('ci-pipeline/terraform') {
-          sh 'terraform apply -auto-approve'
+    post {
+        success {
+            echo '🎉 Pipeline completed successfully!'
         }
-      }
-    }
-
-    stage('Ansible Configure') {
-      steps {
-        dir('ci-pipeline/ansible') {
-          sh 'ansible-playbook -i inventory site.yml'
+        failure {
+            echo '❌ Pipeline failed. Check logs above.'
         }
-      }
     }
-  }
 }
