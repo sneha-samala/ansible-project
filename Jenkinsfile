@@ -3,12 +3,6 @@ pipeline {
 
   stages {
 
-    stage('Checkout') {
-      steps {
-        git 'https://github.com/shaikhshahbazz/ansible-project.git'
-      }
-    }
-
     stage('Terraform Init') {
       steps {
         dir('terraform') {
@@ -32,6 +26,6 @@ pipeline {
         }
       }
     }
+
   }
 }
-
