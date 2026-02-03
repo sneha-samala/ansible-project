@@ -8,12 +8,6 @@ pipeline {
 
     stages {
 
-        stage('Checkout SCM') {
-            steps {
-                checkout scm
-            }
-        }
-
         stage('Terraform Init') {
             steps {
                 dir("${TF_DIR}") {
@@ -24,13 +18,8 @@ pipeline {
 
         stage('Terraform Apply') {
             steps {
-                withCredentials([
-                    string(credentialsId: 'aws-access-key', secretVariable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'aws-secret-key', secretVariable: 'AWS_SECRET_ACCESS_KEY')
-                ]) {
-                    dir("${TF_DIR}") {
-                        sh 'terraform apply -auto-approve'
-                    }
+                dir("${TF_DIR}") {
+                    sh 'terraform apply -auto-approve'
                 }
             }
         }
