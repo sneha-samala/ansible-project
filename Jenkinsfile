@@ -24,14 +24,12 @@ pipeline {
 
         stage('Terraform Apply') {
             steps {
-                withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
-                ]) {
-                    dir('ci-pipeline/terraform') {
-                        sh '''
-                          terraform apply -auto-approve
-                        '''
+                dir('ci-pipeline/terraform') {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'aws-key'
+                    ]]) {
+                        sh 'terraform apply -auto-approve'
                     }
                 }
             }
@@ -39,25 +37,22 @@ pipeline {
 
         stage('Ansible Configure') {
             steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'ssh-private-key',
-                        keyFileVariable: 'SSH_KEY',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
-                    dir('ci-pipeline/ansible') {
+                dir('ci-pipeline/ansible') {
+                    withCredentials([
+                        sshUserPrivateKey(
+                            credentialsId: 'ssh',   // from your screenshot: jenkins-1.pem (ssh)
+                            keyFileVariable: 'SSH_KEY',
+                            usernameVariable: 'SSH_USER'
+                        )
+                    ]) {
                         script {
-                            // Fetch backend IP safely from Terraform output
                             def backend_ip = sh(
-                                script: "terraform -chdir=../terraform output -raw backend_ip || echo ''",
+                                script: "terraform -chdir=../terraform output -raw backend_ip",
                                 returnStdout: true
                             ).trim()
 
                             if (!backend_ip) {
-                                error "❌ Terraform output 'backend_ip' not found! Make sure it's defined in Terraform."
-                            } else {
-                                echo "✅ Backend IP found: ${backend_ip}"
+                                error "Terraform output 'backend_ip' not found!"
                             }
 
                             sh """
@@ -80,10 +75,10 @@ pipeline {
 
     post {
         success {
-            echo '🎉 Pipeline completed successfully without errors!'
+            echo '🎉 Pipeline completed successfully!'
         }
         failure {
-            echo '❌ Pipeline failed. Check logs above.'
+            echo '❌ Pipeline failed. Check logs.'
         }
     }
 }
