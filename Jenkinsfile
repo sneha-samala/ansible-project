@@ -2,15 +2,33 @@ pipeline {
     agent any
 
     environment {
-        AWS_DEFAULT_REGION = "us-east-1"
+        // Pull AWS credentials from Jenkins
+        AWS_ACCESS_KEY_ID     = credentials('aws-access-key-id')
+        AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
+        AWS_DEFAULT_REGION    = 'us-east-1'
     }
 
     stages {
 
-        stage('Checkout') {
+        stage('Checkout SCM') {
             steps {
-                git url: 'https://github.com/shaikhshahbazz/ansible-project.git',
-                    branch: 'main'
+                echo "Checking out code from Git..."
+                git url: 'https://github.com/sneha-samala/ansible-challange.git', branch: 'main'
+            }
+        }
+
+        stage('AWS Configure') {
+            steps {
+                echo "Configuring AWS CLI..."
+                sh '''
+                    mkdir -p ~/.aws
+                    echo "[default]" > ~/.aws/credentials
+                    echo "aws_access_key_id=${AWS_ACCESS_KEY_ID}" >> ~/.aws/credentials
+                    echo "aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}" >> ~/.aws/credentials
+                    echo "[default]" > ~/.aws/config
+                    echo "region=${AWS_DEFAULT_REGION}" >> ~/.aws/config
+                '''
+                sh 'aws sts get-caller-identity'  // validate AWS access
             }
         }
 
@@ -22,57 +40,42 @@ pipeline {
             }
         }
 
-        stage('Terraform Apply') {
+        stage('Terraform Validate') {
             steps {
-                withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
-                ]) {
-                    dir('ci-pipeline/terraform') {
-                        sh '''
-                          terraform apply -auto-approve
-                        '''
-                    }
+                dir('ci-pipeline/terraform') {
+                    sh 'terraform validate'
                 }
             }
         }
 
-        stage('Ansible Configure') {
+        stage('Terraform Plan') {
             steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'ssh-private-key',
-                        keyFileVariable: 'SSH_KEY',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
-                    dir('ci-pipeline/ansible') {
-                        script {
-                            // Fetch backend IP safely from Terraform output
-                            def backend_ip = sh(
-                                script: "terraform -chdir=../terraform output -raw backend_ip || echo ''",
-                                returnStdout: true
-                            ).trim()
+                dir('ci-pipeline/terraform') {
+                    sh 'terraform plan -out=tfplan'
+                }
+            }
+        }
 
-                            if (!backend_ip) {
-                                error "❌ Terraform output 'backend_ip' not found! Make sure it's defined in Terraform."
-                            } else {
-                                echo "✅ Backend IP found: ${backend_ip}"
-                            }
+        stage('Terraform Apply') {
+            steps {
+                dir('ci-pipeline/terraform') {
+                    sh 'terraform apply -auto-approve tfplan'
+                }
+            }
+        }
 
-                            sh """
-                              chmod 600 \$SSH_KEY
-                              export ANSIBLE_HOST_KEY_CHECKING=False
+        stage('Fetch Terraform Output') {
+            steps {
+                dir('ci-pipeline/terraform') {
+                    sh 'terraform output -raw ansible_inventory > ../ansible/inventory.ini'
+                }
+            }
+        }
 
-                              ansible-playbook \
-                                -i inventory \
-                                site.yml \
-                                --user=\$SSH_USER \
-                                --private-key=\$SSH_KEY \
-                                --extra-vars "backend_ip=${backend_ip}"
-                            """
-                        }
-                    }
+        stage('Run Ansible Playbook') {
+            steps {
+                dir('ci-pipeline/ansible') {
+                    sh 'ansible-playbook -i ../ansible/inventory.ini playbook.yml'
                 }
             }
         }
@@ -80,10 +83,10 @@ pipeline {
 
     post {
         success {
-            echo '🎉 Pipeline completed successfully without errors!'
+            echo '✅ Pipeline completed successfully!'
         }
         failure {
-            echo '❌ Pipeline failed. Check logs above.'
+            echo '❌ Pipeline failed. Check console logs.'
         }
     }
 }
